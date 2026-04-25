@@ -142,16 +142,20 @@ export type DiscoverState =
 
 export async function discoverTargetsAction(
   _prev: DiscoverState | null,
-  _formData: FormData,
+  formData: FormData,
 ): Promise<DiscoverState> {
   try {
     const endpoint = edgeFunctionUrl("discover_targets");
     const secret = requireServerEnv("SCRAPE_ANALYZE_SECRET");
 
-    const body = {
-      title: "The Regrainery — local partners",
-      sourceUrl: "https://regrainery.com/",
-    };
+    const projectId = String(formData.get("projectId") ?? "").trim();
+    const sourceUrl = String(formData.get("sourceUrl") ?? "").trim();
+    const title = String(formData.get("title") ?? "").trim();
+
+    const body: Record<string, unknown> = {};
+    if (projectId) body.projectId = projectId;
+    if (sourceUrl) body.sourceUrl = sourceUrl;
+    if (title) body.title = `${title} — local partners`;
 
     const resp = await fetch(endpoint, {
       method: "POST",
