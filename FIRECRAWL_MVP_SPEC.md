@@ -208,43 +208,19 @@ For hackathon speed, define a few schemas and require strict JSON output.
 
 ---
 
-## Match scoring (1–10)
-Define rank as “expected partnership success + mutual value”.
+## Match ranking (1–10)
+Ranking should be a **single GPT‑5.5 judgment**: “Is this a good fit for a partnership package or not?”
 
-### Simple rubric (hackathon-friendly)
-- **Audience overlap** (0–3)
-- **Offer fit** (0–2)
-- **Geo proximity** (0–2)
-- **Brand alignment** (0–1)
-- **Partner-likelihood signals** (0–1)
-- **Contactability** (0–1)
-
-Map to `rank1to10`:
-- \(0–2\) → 1–3
-- \(3–5\) → 4–6
-- \(6–7\) → 7–8
-- \(8–10\) → 9–10
-
----
-
-## Minimal implementation plan (1–2 days)
-### Day 1: working end-to-end
-- **Input form**: source URL + location + radius + target categories
-- **Source profile**:
-  - scrape 5–12 pages via Firecrawl
-  - LLM extracts `SourceBusinessProfile`
-- **Offers**:
-  - LLM generates 3–8 offers
-  - user selects/edits 1 offer
-- **Target discovery**:
-  - call one provider and list targets
-
-### Day 2: target analysis + outreach drafts
-- For top N targets (e.g., 10–25):
-  - Firecrawl scrape 2–5 pages each
-  - LLM produces `TargetAnalysis` (rank + email draft)
-- **Export**:
-  - CSV download: target, rank, reasons, subject, body, website
+- **Output**: `rank1to10` (integer 1–10)
+- **Meaning**:
+  - **9–10**: extremely strong fit; clear mutual value; easy to contact; low risk
+  - **7–8**: good fit; reasonable odds; minor gaps/unknowns
+  - **4–6**: unclear fit; needs reframing or more info; moderate risk
+  - **1–3**: poor fit; likely mismatch or too hard to execute
+- **Also require**:
+  - `matchReasons[]` (2–4 bullets, grounded)
+  - `risks[]` (0–3 bullets)
+  - `personalizationAnchors[]` (the concrete facts used)
 
 ---
 
