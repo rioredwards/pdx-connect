@@ -49,6 +49,8 @@ This repo includes a `web/` Next.js (App Router) app intended to be hosted on Ve
 
 - Vercel project settings (important):
   - Set the Vercel **Root Directory** to `web` (so it picks up `web/package.json` and Next config).
+  - The `web/vercel.json` file pins install/build commands for deterministic deploys.
+  - Node is pinned via `web/package.json` `engines` + `web/.nvmrc` (Vercel reads these).
 
 - Local dev:
 
