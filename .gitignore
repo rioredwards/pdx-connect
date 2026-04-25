@@ -1,0 +1,6 @@
+.DS_Store
+
+# Supabase local state / temp
+supabase/.temp/
+supabase/.env.local
+
