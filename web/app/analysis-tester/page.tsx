@@ -1,6 +1,4 @@
-import { AnalyzeForm } from "../analyze-form";
-import { DiscoverForm } from "../discover-form";
-import { ScrapeForm } from "../scrape-form";
+import { AnalysisTesterWorkflow } from "../analysis-tester-workflow";
 
 import type { Metadata } from "next";
 
@@ -15,15 +13,13 @@ export default function AnalysisTesterPage() {
       <header style={{ marginBottom: 16 }}>
         <h1 style={{ margin: "0 0 8px", fontSize: 28, letterSpacing: -0.02 }}>Analysis tester</h1>
         <p style={{ margin: 0, color: "#334155", lineHeight: 1.5 }}>
-          Scrape a source site, discover local partners (Google Places), then draft outreach and a 1–10 fit score per
-          target (OpenAI). Batch analysis runs <strong>10</strong> targets at a time by default; adjust concurrency on
-          the form.
+          <strong>One workflow:</strong> step 1 creates the project for the business you enter. Steps 2 and 3 use that
+          same project (no copy-paste). Batch analysis runs <strong>10</strong> targets at a time by default; adjust
+          concurrency on the form.
         </p>
       </header>
 
-      <ScrapeForm />
-      <DiscoverForm />
-      <AnalyzeForm />
+      <AnalysisTesterWorkflow />
     </main>
   );
 }

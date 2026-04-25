@@ -146,6 +146,7 @@ Deno.serve(async (req) => {
   }
 
   let supabase: ReturnType<typeof createClient> | null = null;
+  const tHandlerStart = performance.now();
 
   try {
     const expectedSecret = requireEnv("FUNCTION_AUTH_SECRET");
@@ -243,6 +244,7 @@ Deno.serve(async (req) => {
         inserted: 0,
         message: "No places returned. Check API key, Places API (New) enabled, and billing.",
         targets: [],
+        timings: { discoverEdgeMs: Math.round(performance.now() - tHandlerStart) },
       });
     }
 
@@ -277,6 +279,7 @@ Deno.serve(async (req) => {
       radiusMeters: radiusM,
       queries,
       targets: list,
+      timings: { discoverEdgeMs: Math.round(performance.now() - tHandlerStart) },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

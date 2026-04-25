@@ -5,6 +5,7 @@ export type SampleBusiness = {
   website_url: string;
   discover_title: string;
   blurb: string | null;
+  screenshot_url: string | null;
 };
 
 /** Mirrors `20260425180000_sample_businesses.sql` for local UI when PostgREST is not configured. */
@@ -16,6 +17,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://regrainery.com/",
     discover_title: "The Regrainery — local partners",
     blurb: "Trade fabrication, commercial woodwork",
+    screenshot_url: null,
   },
   {
     id: "ziba",
@@ -24,6 +26,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://ziba.com/",
     discover_title: "Ziba Design — local partners",
     blurb: "B2B product, service & brand work",
+    screenshot_url: null,
   },
   {
     id: "holst",
@@ -32,6 +35,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://www.holstarch.com/",
     discover_title: "Holst Architecture — local partners",
     blurb: "Civic, workplace, commercial AEC",
+    screenshot_url: null,
   },
   {
     id: "ankrom",
@@ -40,6 +44,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://ankrom.com/",
     discover_title: "Ankrom Moisan — local partners",
     blurb: "Workplace, multifamily, interiors",
+    screenshot_url: null,
   },
   {
     id: "kpff",
@@ -48,6 +53,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://www.kpff.com/",
     discover_title: "KPFF — local partners",
     blurb: "Structural & civil engineering",
+    screenshot_url: null,
   },
   {
     id: "metaltoad",
@@ -56,6 +62,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://www.metaltoad.com/",
     discover_title: "Metal Toad — local partners",
     blurb: "Cloud & app delivery for orgs",
+    screenshot_url: null,
   },
   {
     id: "stoel",
@@ -64,6 +71,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://www.stoel.com/",
     discover_title: "Stoel Rives — local partners",
     blurb: "Business, IP & corporate law",
+    screenshot_url: null,
   },
   {
     id: "bora",
@@ -72,6 +80,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://www.borarch.com/",
     discover_title: "BORA — local partners",
     blurb: "Labs, higher-ed, workplace design",
+    screenshot_url: null,
   },
   {
     id: "mfa",
@@ -80,6 +89,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://maulfosteralongi.com/",
     discover_title: "Maul Foster Alongi — local partners",
     blurb: "Env planning, land use, agency",
+    screenshot_url: null,
   },
   {
     id: "esco",
@@ -88,6 +98,7 @@ const FALLBACK: SampleBusiness[] = [
     website_url: "https://www.escorp.com/",
     discover_title: "Weir ESCO — local partners",
     blurb: "Engineered wear, mining, infrastructure",
+    screenshot_url: null,
   },
 ];
 
@@ -103,7 +114,7 @@ export async function getSampleBusinesses(): Promise<SampleBusiness[]> {
   }
   const restBase = base.replace(/\/$/, "");
   const url = new URL(`${restBase}/rest/v1/sample_businesses`);
-  url.searchParams.set("select", "id,sort_order,name,website_url,discover_title,blurb");
+  url.searchParams.set("select", "id,sort_order,name,website_url,discover_title,blurb,screenshot_url");
   url.searchParams.set("order", "sort_order.asc");
 
   try {
