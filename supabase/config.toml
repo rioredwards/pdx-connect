@@ -23,3 +23,12 @@ port = 54323
 [functions.scrape_analyze]
 verify_jwt = false
 
+[functions.discover_targets]
+verify_jwt = false
+
+[functions.analyze_target]
+verify_jwt = false
+
+[functions.list_project_targets]
+verify_jwt = false
+
