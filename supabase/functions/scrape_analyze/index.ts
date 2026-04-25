@@ -25,6 +25,15 @@ function requireEnv(name: string): string {
   return v;
 }
 
+/** Supabase secrets are sometimes set with lowercase names in the dashboard. */
+function firstEnv(...names: string[]): string {
+  for (const name of names) {
+    const v = Deno.env.get(name);
+    if (v) return v;
+  }
+  throw new Error(`Missing env: one of ${names.join(", ")}`);
+}
+
 function getBearerToken(req: Request): string | null {
   const auth = req.headers.get("authorization") ?? "";
   if (!auth.toLowerCase().startsWith("bearer ")) return null;
@@ -290,6 +299,8 @@ Content (markdown):
 ${markdown}
 `;
 
+  // Structured outputs: https://platform.openai.com/docs/guides/structured-outputs
+  // Request body: https://platform.openai.com/docs/api-reference/responses/create (`text` → ResponseTextConfig)
   const resp = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -299,13 +310,15 @@ ${markdown}
     body: JSON.stringify({
       model: "gpt-5.5",
       input: prompt,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
+      text: {
+        format: {
+          type: "json_schema",
           name: "source_business_profile",
+          description: "SourceBusinessProfile for a local business website, with citation snippets per field.",
           schema,
           strict: true,
         },
+        verbosity: "medium",
       },
     }),
   });
@@ -315,15 +328,23 @@ ${markdown}
     throw new Error(`OpenAI extraction failed (${resp.status}): ${JSON.stringify(json)}`);
   }
 
-  // Responses API returns structured output in output_text or output[].content.
-  // With json_schema, we can rely on output[0].content[0].json in many cases, but keep it defensive.
+  // Responses API: strict json_schema may arrive as output_json, or as output_text (stringified JSON).
   const content = json?.output?.[0]?.content ?? [];
-  const jsonPart = content.find((c: any) => c?.type === "output_json");
-  if (jsonPart?.json) return jsonPart.json;
+  const jsonPart = content.find((c: { type?: string; json?: unknown }) => c?.type === "output_json");
+  if (jsonPart && typeof jsonPart === "object" && "json" in jsonPart && jsonPart.json != null) {
+    return jsonPart.json;
+  }
 
-  // Fallback: try parsing output_text
-  const text = json?.output_text;
-  if (typeof text === "string" && text.trim().startsWith("{")) return JSON.parse(text);
+  const textPart = content.find((c: { type?: string; text?: string }) => c?.type === "output_text");
+  const rawText = textPart && typeof textPart === "object" && "text" in textPart
+    ? (textPart as { text?: string }).text
+    : undefined;
+  if (typeof rawText === "string" && rawText.trim().startsWith("{")) {
+    return JSON.parse(rawText);
+  }
+
+  const top = json?.output_text;
+  if (typeof top === "string" && top.trim().startsWith("{")) return JSON.parse(top);
 
   throw new Error(`OpenAI response missing structured JSON: ${JSON.stringify(json)}`);
 }
@@ -362,8 +383,8 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = requireEnv("SUPABASE_URL");
     const supabaseServiceKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
-    const firecrawlKey = requireEnv("FIRECRAWL_API_KEY");
-    const openaiKey = requireEnv("OPENAI_API_KEY");
+    const firecrawlKey = firstEnv("FIRECRAWL_API_KEY", "firecrawl_api_key");
+    const openaiKey = firstEnv("OPENAI_API_KEY", "openai_api_key");
 
     supabase = createClient(supabaseUrl, supabaseServiceKey);
 

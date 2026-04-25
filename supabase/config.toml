@@ -18,4 +18,8 @@ port = 54323
 # Note: Supabase CLI runs Edge Functions automatically when you use:
 # `supabase functions serve <name>`
 #
+# Public callers use shared-secret Bearer auth in code (not Supabase JWT).
+# https://supabase.com/docs/guides/functions/function-configuration
+[functions.scrape_analyze]
+verify_jwt = false
 
