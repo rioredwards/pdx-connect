@@ -2,11 +2,21 @@
 
 import type { ExtractedProfile } from "./extracted-profile";
 
+export type ScrapeSourceTimings = {
+  sourceFirecrawlMs?: number;
+  sourceOpenAiMs?: number;
+  sourceEdgeMs?: number;
+};
+
 export type ScrapeSuccessView = {
   extractedProfile: ExtractedProfile | null;
+  sourceUrl: string;
   pagesScraped?: number;
   projectId?: string;
   scrapeRunId?: string;
+  serverTimings?: ScrapeSourceTimings;
+  /** wall-clock for the HTTP call (set by the action caller) */
+  clientRequestMs?: number;
 };
 
 export type ScrapeState =
@@ -136,22 +146,29 @@ export type DiscoverState =
         searchCenter: { lat: number; lng: number };
         radiusMeters: number;
         targets: TargetRow[];
+        serverTimings?: { discoverEdgeMs?: number };
+        clientRequestMs?: number;
       };
     }
   | { ok: false; error: string };
 
 export async function discoverTargetsAction(
   _prev: DiscoverState | null,
-  _formData: FormData,
+  formData: FormData,
 ): Promise<DiscoverState> {
   try {
+    const projectId = String(formData.get("projectId") ?? "").trim();
+    if (!projectId) {
+      return {
+        ok: false,
+        error: "No project is linked. Run step 1 (scrape) first so discovery attaches to that business’s project.",
+      };
+    }
+
     const endpoint = edgeFunctionUrl("discover_targets");
     const secret = requireServerEnv("SCRAPE_ANALYZE_SECRET");
 
-    const body = {
-      title: "The Regrainery — local partners",
-      sourceUrl: "https://regrainery.com/",
-    };
+    const body = { projectId };
 
     const resp = await fetch(endpoint, {
       method: "POST",
@@ -184,6 +201,7 @@ export async function discoverTargetsAction(
       radiusMeters?: number;
       targets?: TargetRow[];
       error?: string;
+      timings?: { discoverEdgeMs?: number };
     };
 
     if (!root.ok) {
@@ -200,6 +218,7 @@ export async function discoverTargetsAction(
         searchCenter: root.searchCenter ?? { lat: 45.554, lng: -122.645 },
         radiusMeters: root.radiusMeters ?? 8047,
         targets: root.targets ?? [],
+        serverTimings: root.timings ? { discoverEdgeMs: root.timings.discoverEdgeMs } : undefined,
       },
     };
   } catch (e) {
@@ -208,10 +227,19 @@ export async function discoverTargetsAction(
   }
 }
 
+export type TargetAnalyzeServerTimings = {
+  targetSiteFirecrawlMs?: number;
+  outreachOpenAiMs?: number;
+  rankOpenAiMs?: number;
+  targetEdgeMs?: number;
+};
+
 export type AnalysisResult = {
   targetBusinessId: string;
   projectId: string;
   scrapeRunId: string;
+  serverTimings?: TargetAnalyzeServerTimings;
+  clientRequestMs?: number;
   analysis: {
     id: string;
     target_business_id: string;
@@ -260,20 +288,31 @@ function isRetryableHttpStatus(status: number) {
   return status === 429 || status === 408 || status === 502 || status === 503;
 }
 
-export async function analyzeTargetAction(
-  _prev: AnalyzeState | null,
-  formData: FormData,
-): Promise<AnalyzeState> {
+type AnalyzeOptions = {
+  targetBusinessId: string;
+  skipScrape?: boolean;
+  openAiModel?: string;
+  textVerbosity?: "low" | "medium";
+};
+
+async function analyzeOneTarget(opts: AnalyzeOptions): Promise<AnalyzeState> {
   try {
-    const targetBusinessId = String(formData.get("targetBusinessId") ?? "").trim();
+    const targetBusinessId = opts.targetBusinessId.trim();
     if (!targetBusinessId) {
-      return { ok: false, error: "Target business id is required (copy from the discovery table or DB)." };
+      return { ok: false, error: "Target business id is required." };
     }
-    const skipScrape = formData.get("skipScrape") === "on" || formData.get("skipScrape") === "true";
 
     const endpoint = edgeFunctionUrl("analyze_target");
     const secret = requireServerEnv("SCRAPE_ANALYZE_SECRET");
-    const body = JSON.stringify({ targetBusinessId, skipScrape });
+    const payload: Record<string, unknown> = {
+      targetBusinessId,
+      skipScrape: opts.skipScrape === true,
+    };
+    if (opts.openAiModel) payload.openAiModel = opts.openAiModel;
+    if (opts.textVerbosity === "low" || opts.textVerbosity === "medium") {
+      payload.textVerbosity = opts.textVerbosity;
+    }
+    const body = JSON.stringify(payload);
 
     let lastError = "analyze_target failed.";
 
@@ -331,6 +370,7 @@ export async function analyzeTargetAction(
         projectId?: string;
         scrapeRunId?: string;
         analysis?: AnalysisResult["analysis"];
+        timings?: TargetAnalyzeServerTimings;
       };
 
       if (!root.ok) {
@@ -340,10 +380,19 @@ export async function analyzeTargetAction(
         return { ok: false, error: "Missing analysis in response." };
       }
 
+      const t = root.timings;
       const result: AnalysisResult = {
         targetBusinessId: root.targetBusinessId ?? targetBusinessId,
         projectId: root.projectId ?? "",
         scrapeRunId: root.scrapeRunId ?? "",
+        serverTimings: t
+          ? {
+              targetSiteFirecrawlMs: t.targetSiteFirecrawlMs,
+              outreachOpenAiMs: t.outreachOpenAiMs,
+              rankOpenAiMs: t.rankOpenAiMs,
+              targetEdgeMs: t.targetEdgeMs,
+            }
+          : undefined,
         analysis: root.analysis,
       };
 
@@ -357,6 +406,113 @@ export async function analyzeTargetAction(
   }
 }
 
+export async function analyzeTargetAction(
+  _prev: AnalyzeState | null,
+  formData: FormData,
+): Promise<AnalyzeState> {
+  const targetBusinessId = String(formData.get("targetBusinessId") ?? "").trim();
+  if (!targetBusinessId) {
+    return { ok: false, error: "Target business id is required (copy from the discovery table or DB)." };
+  }
+  const skipScrape = formData.get("skipScrape") === "on" || formData.get("skipScrape") === "true";
+  const openAiModel = String(formData.get("openAiModel") ?? "").trim() || undefined;
+  const tv = String(formData.get("textVerbosity") ?? "").trim();
+  const textVerbosity = tv === "low" || tv === "medium" ? tv : undefined;
+
+  return analyzeOneTarget({ targetBusinessId, skipScrape, openAiModel, textVerbosity });
+}
+
+export type AnalyzeBatchItem =
+  | {
+      ok: true;
+      targetBusinessId: string;
+      name: string;
+      clientRequestMs: number;
+      result: AnalysisResult;
+    }
+  | {
+      ok: false;
+      targetBusinessId: string;
+      name: string;
+      clientRequestMs: number;
+      error: string;
+    };
+
+export type AnalyzeBatchState =
+  | {
+      ok: true;
+      items: AnalyzeBatchItem[];
+      /** wall clock on the Node.js server while running all targets in parallel */
+      batchWallMs: number;
+      concurrency: number;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Run `analyze_target` for many targets at once on the server (Node.js fetch is
+ * fully concurrent). This avoids the Next.js Server Action serialization that
+ * happens when the browser dispatches actions in `Promise.all`.
+ */
+export async function analyzeTargetsBatchAction(
+  inputs: { targetBusinessId: string; name: string }[],
+  options: {
+    skipScrape?: boolean;
+    openAiModel?: string;
+    textVerbosity?: "low" | "medium";
+  },
+): Promise<AnalyzeBatchState> {
+  try {
+    if (!Array.isArray(inputs) || inputs.length === 0) {
+      return { ok: false, error: "No targets supplied." };
+    }
+    const cleaned = inputs
+      .map((i) => ({
+        targetBusinessId: String(i?.targetBusinessId ?? "").trim(),
+        name: String(i?.name ?? "").trim() || "Unknown",
+      }))
+      .filter((i) => i.targetBusinessId);
+    if (cleaned.length === 0) {
+      return { ok: false, error: "No valid targetBusinessId values." };
+    }
+
+    const t0 = Date.now();
+    const items = await Promise.all(
+      cleaned.map(async (it) => {
+        const tStart = Date.now();
+        const r = await analyzeOneTarget({
+          targetBusinessId: it.targetBusinessId,
+          skipScrape: options.skipScrape,
+          openAiModel: options.openAiModel,
+          textVerbosity: options.textVerbosity,
+        });
+        const ms = Date.now() - tStart;
+        if (!r.ok) {
+          return {
+            ok: false as const,
+            targetBusinessId: it.targetBusinessId,
+            name: it.name,
+            clientRequestMs: ms,
+            error: r.error,
+          };
+        }
+        return {
+          ok: true as const,
+          targetBusinessId: it.targetBusinessId,
+          name: it.name,
+          clientRequestMs: ms,
+          result: { ...r.result, clientRequestMs: ms },
+        };
+      }),
+    );
+    const batchWallMs = Date.now() - t0;
+
+    return { ok: true, items, batchWallMs, concurrency: cleaned.length };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: message };
+  }
+}
+
 export async function scrapeWebsiteAction(
   _prev: ScrapeState | null,
   formData: FormData,
@@ -364,9 +520,13 @@ export async function scrapeWebsiteAction(
   try {
     const url = String(formData.get("url") ?? "").trim();
     if (!url) return { ok: false, error: "URL is required." };
+    const userHint = String(formData.get("userHint") ?? "").trim().slice(0, 800);
 
     const endpoint = requireServerEnv("SCRAPE_ANALYZE_URL");
     const secret = requireServerEnv("SCRAPE_ANALYZE_SECRET");
+
+    const payload: Record<string, unknown> = { url };
+    if (userHint) payload.userHint = userHint;
 
     const resp = await fetch(endpoint, {
       method: "POST",
@@ -374,7 +534,7 @@ export async function scrapeWebsiteAction(
         authorization: `Bearer ${secret}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(payload),
       cache: "no-store",
     });
 
@@ -395,13 +555,16 @@ export async function scrapeWebsiteAction(
       pagesScraped?: number;
       projectId?: string;
       scrapeRunId?: string;
+      timings?: ScrapeSourceTimings;
     };
 
     const view: ScrapeSuccessView = {
       extractedProfile: root.extractedProfile ?? null,
+      sourceUrl: url,
       pagesScraped: root.pagesScraped,
       projectId: root.projectId,
       scrapeRunId: root.scrapeRunId,
+      serverTimings: root.timings,
     };
 
     return { ok: true, pretty: JSON.stringify(parsed, null, 2), view };

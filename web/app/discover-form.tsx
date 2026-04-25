@@ -12,7 +12,13 @@ function miles(m: number | null | undefined) {
   return `${(m / 1609.34).toFixed(1)} mi`;
 }
 
-export function DiscoverForm() {
+type DiscoverFormProps = {
+  /** From step 1: discovery writes targets under this project. */
+  activeProjectId: string | null;
+  sourceUrl?: string | null;
+};
+
+export function DiscoverForm({ activeProjectId, sourceUrl }: DiscoverFormProps) {
   const [state, formAction] = useActionState(discoverTargetsAction, initial);
 
   return (
@@ -30,27 +36,54 @@ export function DiscoverForm() {
       <div>
         <h2 style={{ margin: "0 0 6px", fontSize: 18, color: "#0f172a" }}>2. Local partners (Google Places)</h2>
         <p style={{ margin: 0, fontSize: 14, color: "#64748b", lineHeight: 1.5 }}>
-          Runs the <code>discover_targets</code> function: Text Search around NE Portland (~5 mi) using categories aligned
-          with the Regrainery test case (interiors, staging, architecture, hotels, event-friendly cafés). Results are
-          saved to <code>target_businesses</code>.
+          Uses the <strong>same project as step 1</strong> (the site you scraped). Text Search around NE Portland (~5 mi)
+          with default categories (interiors, staging, architecture, hotels, event-friendly cafés). Results are saved to{" "}
+          <code>target_businesses</code> for that project.
         </p>
+        {sourceUrl ? (
+          <p style={{ margin: "8px 0 0", fontSize: 13, color: "#475569" }}>
+            Source business: <code style={{ fontSize: 12 }}>{sourceUrl}</code>
+          </p>
+        ) : null}
+        {!activeProjectId ? (
+          <p
+            style={{
+              margin: "10px 0 0",
+              padding: 10,
+              borderRadius: 8,
+              background: "#fffbeb",
+              border: "1px solid #fde68a",
+              color: "#92400e",
+              fontSize: 13,
+            }}
+          >
+            Run <strong>step 1</strong> first. After a successful scrape, this step is enabled and partners are linked to
+            that business’s project.
+          </p>
+        ) : (
+          <p style={{ margin: "10px 0 0", fontSize: 12, color: "#64748b" }}>
+            Project: <code>{activeProjectId}</code>
+          </p>
+        )}
       </div>
 
       <form action={formAction}>
+        <input type="hidden" name="projectId" value={activeProjectId ?? ""} />
         <button
           type="submit"
+          disabled={!activeProjectId}
           style={{
             padding: "10px 14px",
             borderRadius: 10,
             border: "1px solid #0d9488",
-            background: "#0d9488",
+            background: activeProjectId ? "#0d9488" : "#99f6e4",
             color: "white",
             fontSize: 14,
             fontWeight: 600,
-            cursor: "pointer",
+            cursor: activeProjectId ? "pointer" : "not-allowed",
           }}
         >
-          Find potential partners (Regrainery defaults)
+          Find potential partners
         </button>
       </form>
 

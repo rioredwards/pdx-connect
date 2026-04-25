@@ -34,7 +34,7 @@ insert into public.sample_businesses (id, sort_order, name, website_url, discove
     'holst',
     3,
     'Holst Architecture',
-    'https://www.holstarch.com/',
+    'https://www.holstarc.com/',
     'Holst Architecture — local partners',
     'Civic, workplace, commercial AEC'
   ),
@@ -90,7 +90,7 @@ insert into public.sample_businesses (id, sort_order, name, website_url, discove
     'esco',
     10,
     'Weir ESCO (ESCO)',
-    'https://www.escorp.com/',
+    'https://www.esco.weir/',
     'Weir ESCO — local partners',
     'Engineered wear, mining, infrastructure'
   )

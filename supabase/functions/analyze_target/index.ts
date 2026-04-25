@@ -75,6 +75,19 @@ async function firecrawlScrapePage(url: string, apiKey: string): Promise<unknown
   return json;
 }
 
+type TextVerbosity = "low" | "medium";
+
+function resolveTextVerbosity(
+  fromBody: string | undefined,
+  fromEnv: string | undefined,
+): TextVerbosity {
+  const b = (fromBody ?? "").trim().toLowerCase();
+  if (b === "low" || b === "medium") return b;
+  const e = (fromEnv ?? "").trim().toLowerCase();
+  if (e === "low" || e === "medium") return e;
+  return "medium";
+}
+
 async function openaiResponses(
   model: string,
   input: string,
@@ -82,6 +95,7 @@ async function openaiResponses(
   schemaName: string,
   description: string,
   apiKey: string,
+  textVerbosity: TextVerbosity,
 ) {
   const resp = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -100,7 +114,7 @@ async function openaiResponses(
           schema,
           strict: true,
         },
-        verbosity: "medium",
+        verbosity: textVerbosity,
       },
     }),
   });
@@ -141,7 +155,11 @@ const OUTREACH_SCHEMA = {
       additionalProperties: false,
       properties: {
         subjectOptions: { type: "array", items: { type: "string" } },
-        body: { type: "string" },
+        body: {
+          type: "string",
+          description:
+            "Plain-text email body, 1 or 2 short paragraphs (one blank line between if two). Never 3+ paragraphs, never bullet lists as the main message. Sounds like a friendly local neighbor, not a cold sales pitch. Absolutely no em dashes (—) and no en dashes (–) anywhere; use commas, periods, or simple hyphens.",
+        },
       },
       required: ["subjectOptions", "body"],
     },
@@ -165,6 +183,7 @@ Deno.serve(async (req) => {
     return jsonResponse(405, { error: "Use POST" });
   }
 
+  const tHandlerStart = performance.now();
   try {
     const expectedSecret = requireEnv("FUNCTION_AUTH_SECRET");
     const provided = getBearerToken(req);
@@ -172,7 +191,12 @@ Deno.serve(async (req) => {
       return jsonResponse(401, { error: "Unauthorized" });
     }
 
-    const body = (await req.json().catch(() => ({}))) as { targetBusinessId?: string; skipScrape?: boolean };
+    const body = (await req.json().catch(() => ({}))) as {
+      targetBusinessId?: string;
+      skipScrape?: boolean;
+      openAiModel?: string;
+      textVerbosity?: string;
+    };
     if (!body.targetBusinessId || typeof body.targetBusinessId !== "string") {
       return jsonResponse(400, { error: "Missing 'targetBusinessId' (uuid string)" });
     }
@@ -180,7 +204,12 @@ Deno.serve(async (req) => {
     const supabase = createClient(requireEnv("SUPABASE_URL"), requireEnv("SUPABASE_SERVICE_ROLE_KEY"));
     const openaiKey = firstEnv("OPENAI_API_KEY", "openai_api_key");
     const firecrawlKey = firstEnv("FIRECRAWL_API_KEY", "firecrawl_api_key");
-    const model = "gpt-5.5";
+    const envModel = Deno.env.get("ANALYZE_OPENAI_MODEL")?.trim();
+    const model =
+      typeof body.openAiModel === "string" && body.openAiModel.trim()
+        ? body.openAiModel.trim()
+        : (envModel || "gpt-5.4-nano");
+    const textVerbosity = resolveTextVerbosity(body.textVerbosity, Deno.env.get("ANALYZE_TEXT_VERBOSITY") ?? undefined);
 
     const { data: target, error: tErr } = await supabase
       .from("target_businesses")
@@ -253,8 +282,10 @@ Deno.serve(async (req) => {
 
     let targetMarkdown = "";
     let firecrawlSnapshot: unknown = null;
+    let targetSiteFirecrawlMs = 0;
     const site = target.website_url as string | null;
     if (site && !body.skipScrape) {
+      const tFc = performance.now();
       try {
         firecrawlSnapshot = await firecrawlScrapePage(site, firecrawlKey);
         targetMarkdown = String((firecrawlSnapshot as { data?: { markdown?: string } })?.data?.markdown ?? "");
@@ -285,6 +316,8 @@ Deno.serve(async (req) => {
             null,
             2,
           );
+      } finally {
+        targetSiteFirecrawlMs = Math.round(performance.now() - tFc);
       }
     } else {
       targetMarkdown = site
@@ -322,13 +355,46 @@ Deno.serve(async (req) => {
     };
 
     // --- OpenAI 1: outreach (separate API call) ---
-    const outreachPrompt = `You help a local B2B partnership outreach. Draft an email the SOURCE business could send to the TARGET.
+    const outreachPrompt = `You are helping a Portland-area business send a friendly, neighborly note to another local business about a possible partnership. The email should read like a real person who lives and works in the same neighborhood reaching out, not a cold sales template from a stranger.
 
-Rules:
+VOICE AND TONE
+- Warm, calm, low-pressure. Like you'd actually talk to a neighbor.
+- Conversational. Contractions are good (we're, it's, I'd, you've).
+- No corporate jargon or buzzwords (synergy, leverage, value-add, circle back, partner up, exciting opportunity, reach out, touch base).
+- No cold-email clichés (I came across your website, I was impressed by your work, I love what you're doing, hope this finds you well, just wanted to reach out, quick question).
+- No flattery without substance. Skip the generic compliment.
+
+PUNCTUATION (HARD RULE)
+- Absolutely NO em dashes (—) anywhere. Not in the body, not in subject lines, not in anchors, not in the target summary.
+- Also no en dashes (–). Use commas, periods, or short sentences. A simple hyphen (-) is only OK inside a compound word.
+- If you would normally reach for a dash, rewrite the sentence instead.
+
+PERSONALIZATION (THE WHOLE POINT)
+- Lean directly on TARGET SITE MARKDOWN. Pull out something concrete: a specific service, a recent project, a material or technique they describe, the kind of clients they serve, a value or vibe they put forward, a niche they've carved out.
+- The detail should be specific enough that a competitor could not have written the same email to a different business. If the line could be sent to any shop in the same category, rewrite it.
+- Avoid surface-level facts that any cold-emailer could grab from a Google listing: their address, phone, "you're based in Portland", "I see you've been in business since...", their star rating, etc. Those are not personalization.
+- If TARGET SITE MARKDOWN is empty, very thin, or only listing metadata, lean on the specific kind of work suggested by their category and stay a little vague rather than fabricate. Do NOT invent projects, awards, clients, years in business, or quotes.
+
+STRUCTURE OF emailDraft.body
+- Plain text. Exactly 1 or 2 short paragraphs. One blank line between them if two. Never 3+ paragraphs. No bullet lists as the main message.
+- Open with a specific, grounded observation tied to their actual work (not a compliment cliché).
+- Briefly say who the SOURCE is in human terms and the natural, honest reason a connection could make sense for both sides. Tie it to something real about what they do.
+- End low-key: an invitation to grab a coffee, a quick call, or just a reply if it sounds interesting. Not pushy. No urgency tactics.
+- Keep it short. Aim for something a busy owner would actually finish reading.
+
+subjectOptions
+- 2 or 3 short options. Sentence case or lowercase, both fine.
+- Sound like something a local person would actually write. Reference a specific detail when you can.
+- No clickbait, no all caps, no "Quick question", no "Re:" tricks.
+- No em dashes or en dashes.
+
+OTHER FIELDS
+- targetProfile: brief summary and key attributes of the TARGET, grounded only in the data below.
+- personalizationAnchors: 2 to 4 short facts the email actually uses, each with sourceUrl pointing to a page (target site, source site, or the literal string "listing" if only metadata was available). Only include facts the email body genuinely leans on.
+
+GROUNDING (HARD RULE)
 - Only state facts that appear in SOURCE PROFILE, OFFER, TARGET METADATA, or TARGET SITE MARKDOWN. If something is unknown, do not invent it.
-- personalizationAnchors: 2–4 short facts the email leans on, with sourceUrl pointing to a page (target site, source site, or "listing" if only metadata).
-- targetProfile: brief summary and key attributes of the TARGET.
-- emailDraft: 2–3 subject lines and an email body (plain text). Friendly, specific, not salesy. Include a light CTA (e.g. short call) when appropriate.
+- Do not mention "outreach", "campaign", "list", or anything that signals this is a templated message.
 
 SOURCE BUSINESS (${sourceLabel}):
 ${JSON.stringify(sourceProfile, null, 2)}
@@ -343,18 +409,21 @@ TARGET SITE MARKDOWN (may be short or from listing only):
 ${targetMarkdown}
 `;
 
+    const tOutreach = performance.now();
     const outreach = (await openaiResponses(
       model,
       outreachPrompt,
       OUTREACH_SCHEMA as unknown as Record<string, unknown>,
       "outreach_draft",
-      "Cold email + anchors + target summary for a partner outreach",
+      "Structured outreach: 2 to 3 subject options, body 1 to 2 short paragraphs only, friendly local-neighbor tone, no em dashes or en dashes, plus personalization anchors and target summary.",
       openaiKey,
+      textVerbosity,
     )) as {
       targetProfile: { summary: string; keyAttributes: string[] };
       personalizationAnchors: { fact: string; sourceUrl: string }[];
       emailDraft: { subjectOptions: string[]; body: string };
     };
+    const outreachOpenAiMs = Math.round(performance.now() - tOutreach);
 
     // --- OpenAI 2: rank (separate API call) ---
     const rankPrompt = `You evaluate realistic odds that a *partnership conversation* (not a sale) between SOURCE and TARGET would succeed: mutual fit, believable value exchange, and practical reachability.
@@ -379,6 +448,7 @@ Body:
 ${outreach.emailDraft.body}
 `;
 
+    const tRank = performance.now();
     const rank = (await openaiResponses(
       model,
       rankPrompt,
@@ -386,7 +456,9 @@ ${outreach.emailDraft.body}
       "partnership_rank",
       "1–10 partnership fit with reasons and risks",
       openaiKey,
+      textVerbosity,
     )) as { rank1to10: number; matchReasons: string[]; risks: string[] };
+    const rankOpenAiMs = Math.round(performance.now() - tRank);
 
     const rankInt = Math.min(10, Math.max(1, Math.round(Number(rank.rank1to10) || 5)));
 
@@ -422,6 +494,14 @@ ${outreach.emailDraft.body}
       scrapeRunId: runId,
       analysis: analysisRow,
       openAiCalls: { outreach: 1, rank: 1 },
+      openAiModel: model,
+      textVerbosity,
+      timings: {
+        targetSiteFirecrawlMs,
+        outreachOpenAiMs,
+        rankOpenAiMs,
+        targetEdgeMs: Math.round(performance.now() - tHandlerStart),
+      },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

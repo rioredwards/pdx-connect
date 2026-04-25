@@ -217,7 +217,12 @@ async function scrapeSourceBusinessSite(
   };
 }
 
-async function openaiExtractProfile(markdown: string, sourceUrl: string, apiKey: string) {
+async function openaiExtractProfile(
+  markdown: string,
+  sourceUrl: string,
+  apiKey: string,
+  userHint?: string,
+) {
   // Using Responses API for structured JSON extraction.
   // Note: model name per product spec: "gpt-5.5"
   const schema = {
@@ -284,6 +289,10 @@ async function openaiExtractProfile(markdown: string, sourceUrl: string, apiKey:
     ],
   };
 
+  const ownerHintBlock = userHint && userHint.trim()
+    ? `\nOwner hint (user-supplied; treat as authoritative for intent and context, but only include facts also supported by the website content):\n${userHint.trim()}\n`
+    : "";
+
   const prompt = `Extract a structured business profile from the provided website content.
 
 The markdown may come from several pages of the same site, separated by "## Source page:" headings.
@@ -293,7 +302,7 @@ Rules:
 - If a field is unknown, use an empty string or empty array, but keep required fields present.
 - Citations: use the "Source page" URL when citing which page a snippet came from.
 - If sections conflict, prefer information from an About, Services, or Contact page over generic home copy when appropriate.
-
+${ownerHintBlock}
 Primary website URL: ${sourceUrl}
 Content (markdown):
 ${markdown}
@@ -359,6 +368,7 @@ Deno.serve(async (req) => {
   let supabase: ReturnType<typeof createClient> | null = null;
   let runId: string | null = null;
 
+  const tHandlerStart = performance.now();
   try {
     // Shared secret between your Next.js (Vercel) server and this Edge Function.
     // Set `FUNCTION_AUTH_SECRET` in Supabase function secrets to match Vercel's `SCRAPE_ANALYZE_SECRET`.
@@ -369,14 +379,16 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { url, projectId, maxExtraPages: rawMaxExtra } = body as {
+    const { url, projectId, maxExtraPages: rawMaxExtra, userHint: rawUserHint } = body as {
       url?: string;
       projectId?: string;
       maxExtraPages?: number;
+      userHint?: string;
     };
     if (!url || typeof url !== "string") {
       return jsonResponse(400, { error: "Missing 'url' (string)" });
     }
+    const userHint = typeof rawUserHint === "string" ? rawUserHint.slice(0, 800).trim() : "";
 
     const maxExtra = Math.min(
       MAX_EXTRA_PAGES_CAP,
@@ -416,11 +428,13 @@ Deno.serve(async (req) => {
     if (runErr) throw runErr;
     runId = run.id;
 
+    const tFirecrawl = performance.now();
     const { combinedMarkdown, homeScrape, pageResults } = await scrapeSourceBusinessSite(
       url,
       firecrawlKey,
       maxExtra,
     );
+    const sourceFirecrawlMs = Math.round(performance.now() - tFirecrawl);
 
     const firecrawlBundle = {
       strategy: "multi_page" as const,
@@ -430,7 +444,9 @@ Deno.serve(async (req) => {
       combinedMarkdown,
     };
 
-    const extracted = await openaiExtractProfile(combinedMarkdown, url, openaiKey);
+    const tOpenAi = performance.now();
+    const extracted = await openaiExtractProfile(combinedMarkdown, url, openaiKey, userHint);
+    const sourceOpenAiMs = Math.round(performance.now() - tOpenAi);
 
     const { error: updRunErr } = await supabase
       .from("scrape_runs")
@@ -457,6 +473,11 @@ Deno.serve(async (req) => {
       scrapeRunId: run.id,
       extractedProfile: extracted,
       pagesScraped: pageResults.length,
+      timings: {
+        sourceFirecrawlMs,
+        sourceOpenAiMs,
+        sourceEdgeMs: Math.round(performance.now() - tHandlerStart),
+      },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

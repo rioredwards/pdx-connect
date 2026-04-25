@@ -1,14 +1,30 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 
 import { scrapeWebsiteAction, type ScrapeState } from "./actions";
 import { ProfileDisplay } from "./profile-display";
+import type { WorkflowProject } from "./workflow-types";
 
 const initialState: ScrapeState | null = null;
 
-export function ScrapeForm() {
+type Props = {
+  /** Fires when step 1 succeeds so the rest of the flow can use the same `project_id`. */
+  onWorkflowProjectReady?: (project: WorkflowProject) => void;
+};
+
+export function ScrapeForm({ onWorkflowProjectReady }: Props = {}) {
   const [state, formAction] = useActionState(scrapeWebsiteAction, initialState);
+  const lastNotified = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!state?.ok || !state.view.projectId) return;
+    const { projectId, sourceUrl } = state.view;
+    const key = `${projectId}:${state.view.scrapeRunId ?? ""}`;
+    if (lastNotified.current === key) return;
+    lastNotified.current = key;
+    onWorkflowProjectReady?.({ projectId, sourceUrl });
+  }, [state, onWorkflowProjectReady]);
 
   return (
     <form
@@ -22,6 +38,12 @@ export function ScrapeForm() {
         background: "white",
       }}
     >
+      <div>
+        <h2 style={{ margin: "0 0 6px", fontSize: 18, color: "#0f172a" }}>1. Source business (scrape)</h2>
+        <p style={{ margin: 0, fontSize: 14, color: "#64748b", lineHeight: 1.5 }}>
+          Creates a <code>project</code> and extracted profile. Steps 2–3 will use that project.
+        </p>
+      </div>
       <div style={{ display: "grid", gap: 8 }}>
         <label htmlFor="url" style={{ fontSize: 14, fontWeight: 600 }}>
           Website URL

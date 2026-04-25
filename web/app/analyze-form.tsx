@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { mapPool } from "@/lib/batch-pool";
 
@@ -15,14 +15,30 @@ const initial: AnalyzeState | null = null;
 
 type BatchLine = { name: string; ok: boolean; rank?: number | null; error?: string };
 
-export function AnalyzeForm() {
+type AnalyzeFormProps = {
+  /** When set (from step 1), batch analysis uses this project without pasting a UUID. */
+  activeProjectId?: string | null;
+  sourceUrl?: string | null;
+};
+
+export function AnalyzeForm({ activeProjectId = null, sourceUrl = null }: AnalyzeFormProps) {
   const [state, formAction] = useActionState(analyzeTargetAction, initial);
   const p = state && state.ok ? state.result.analysis.payload : null;
   const rank = state && state.ok ? state.result.analysis.rank_1_to_10 : null;
 
   const [projectId, setProjectId] = useState("");
+
+  useEffect(() => {
+    if (activeProjectId?.trim()) {
+      setProjectId(activeProjectId.trim());
+    }
+  }, [activeProjectId]);
   const [batchOnlyPending, setBatchOnlyPending] = useState(true);
   const [batchSkipScrape, setBatchSkipScrape] = useState(false);
+  /** Override model; leave empty to use the edge default (ANALYZE_OPENAI_MODEL or gpt-5.4-nano). */
+  const [batchOpenAiModel, setBatchOpenAiModel] = useState("");
+  /** Omit to use function env default; "low" trades some richness for lower latency. */
+  const [batchTextVerbosity, setBatchTextVerbosity] = useState<"" | "low" | "medium">("low");
   /** In-flight at once (1–50). Not all 50 strict parallel: caps simultaneous edge calls. */
   const [batchConcurrency, setBatchConcurrency] = useState(10);
   const [batchRunning, setBatchRunning] = useState(false);
@@ -30,12 +46,14 @@ export function AnalyzeForm() {
   const [batchLog, setBatchLog] = useState<BatchLine[]>([]);
   const [batchError, setBatchError] = useState<string | null>(null);
 
+  const batchProjectId = (activeProjectId?.trim() || projectId.trim());
+
   async function runBatch50() {
     setBatchError(null);
     setBatchLog([]);
-    const pid = projectId.trim();
+    const pid = batchProjectId;
     if (!pid) {
-      setBatchError("Enter a project ID (from the discovery run summary).");
+      setBatchError("Run step 1 (scrape) to link a project, or enter a project ID for batch.");
       return;
     }
 
@@ -81,6 +99,12 @@ export function AnalyzeForm() {
         const fd = new FormData();
         fd.set("targetBusinessId", t.id);
         fd.set("skipScrape", batchSkipScrape ? "true" : "");
+        if (batchOpenAiModel.trim()) {
+          fd.set("openAiModel", batchOpenAiModel.trim());
+        }
+        if (batchTextVerbosity) {
+          fd.set("textVerbosity", batchTextVerbosity);
+        }
         const r = await analyzeTargetAction(null, fd);
         return { t, r };
       },
@@ -118,9 +142,15 @@ export function AnalyzeForm() {
         <h2 style={{ margin: "0 0 6px", fontSize: 18, color: "#0f172a" }}>3. Outreach + fit rank (OpenAI)</h2>
         <p style={{ margin: 0, fontSize: 14, color: "#64748b", lineHeight: 1.5 }}>
           Calls <code>analyze_target</code>: optional Firecrawl of the target site, then <strong>two</strong> OpenAI
-          Responses (structured): (1) email draft + anchors + target summary, (2) partnership fit <strong>1–10</strong>{" "}
-          with match reasons and risks. Saved to <code>target_analyses</code>.
+          Responses (structured JSON): (1) email draft (body is <strong>1–2 paragraphs</strong>) + anchors + target
+          summary, (2) partnership fit <strong>1–10</strong> with match reasons and risks. Saved to{" "}
+          <code>target_analyses</code> for the <strong>same project as step 1</strong> (the business you scraped).
         </p>
+        {sourceUrl && activeProjectId ? (
+          <p style={{ margin: "8px 0 0", fontSize: 13, color: "#475569" }}>
+            Source: <code style={{ fontSize: 12 }}>{sourceUrl}</code> · project <code style={{ fontSize: 12 }}>{activeProjectId}</code>
+          </p>
+        ) : null}
       </div>
 
       <div
@@ -139,24 +169,43 @@ export function AnalyzeForm() {
           first). “Only without analysis” skips targets that already have <code>target_analyses</code>.
         </p>
         <div style={{ display: "grid", gap: 10, maxWidth: 520 }}>
-          <div style={{ display: "grid", gap: 6 }}>
-            <label htmlFor="batchProjectId" style={{ fontSize: 14, fontWeight: 600 }}>
-              Project ID
-            </label>
-            <input
-              id="batchProjectId"
-              type="text"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              placeholder="UUID from discovery (e.g. after “Run potential partners”)"
+          {activeProjectId ? (
+            <div
               style={{
                 padding: "10px 12px",
                 borderRadius: 10,
-                border: "1px solid #d7d7d7",
-                fontSize: 14,
+                border: "1px solid #c4b5fd",
+                background: "white",
+                fontSize: 13,
+                color: "#4c1d95",
               }}
-            />
-          </div>
+            >
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Project (from step 1)</div>
+              <code style={{ fontSize: 12, wordBreak: "break-all" }}>{activeProjectId}</code>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 6 }}>
+              <label htmlFor="batchProjectId" style={{ fontSize: 14, fontWeight: 600 }}>
+                Project ID
+              </label>
+              <input
+                id="batchProjectId"
+                type="text"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                placeholder="Run step 1 first, or paste a project UUID"
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #d7d7d7",
+                  fontSize: 14,
+                }}
+              />
+              <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
+                Prefer running step 1 in this page so a project is linked automatically.
+              </p>
+            </div>
+          )}
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14, color: "#475569" }}>
             <input
               type="checkbox"
@@ -173,6 +222,54 @@ export function AnalyzeForm() {
             />
             Skip Firecrawl for every target in this batch (faster)
           </label>
+          <div style={{ display: "grid", gap: 6, maxWidth: 520 }}>
+            <label htmlFor="batchOpenAiModel" style={{ fontSize: 14, fontWeight: 600 }}>
+              OpenAI model (optional, batch)
+            </label>
+            <input
+              id="batchOpenAiModel"
+              type="text"
+              value={batchOpenAiModel}
+              onChange={(e) => setBatchOpenAiModel(e.target.value)}
+              placeholder="gpt-5.4-nano"
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: "1px solid #d7d7d7",
+                fontSize: 14,
+              }}
+            />
+            <p style={{ margin: 0, fontSize: 12, color: "#7c3aed" }}>
+              Default is <code>gpt-5.4-nano</code> (structured JSON + tight 1–2 paragraph body). Empty = Supabase{" "}
+              <code>ANALYZE_OPENAI_MODEL</code> or function default.
+            </p>
+          </div>
+          <div style={{ display: "grid", gap: 6, maxWidth: 360 }}>
+            <label htmlFor="batchTextVerbosity" style={{ fontSize: 14, fontWeight: 600 }}>
+              Response verbosity
+            </label>
+            <select
+              id="batchTextVerbosity"
+              value={batchTextVerbosity}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || v === "low" || v === "medium") {
+                  setBatchTextVerbosity(v);
+                }
+              }}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: "1px solid #d7d7d7",
+                fontSize: 14,
+                maxWidth: 280,
+              }}
+            >
+              <option value="">Default (function / env)</option>
+              <option value="low">low (faster)</option>
+              <option value="medium">medium</option>
+            </select>
+          </div>
           <div style={{ display: "grid", gap: 6 }}>
             <label htmlFor="batchConcurrency" style={{ fontSize: 14, fontWeight: 600 }}>
               Concurrency (in-flight at once, 1–50)
@@ -290,6 +387,43 @@ export function AnalyzeForm() {
           <input type="checkbox" name="skipScrape" />
           Skip Firecrawl (faster; uses Places + source profile only)
         </label>
+        <div style={{ display: "grid", gap: 6, maxWidth: 480 }}>
+          <label htmlFor="singleOpenAiModel" style={{ fontSize: 14, fontWeight: 600 }}>
+            OpenAI model (optional)
+          </label>
+          <input
+            id="singleOpenAiModel"
+            name="openAiModel"
+            type="text"
+            placeholder="gpt-5.4-nano"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid #d7d7d7",
+              fontSize: 14,
+            }}
+          />
+        </div>
+        <div style={{ display: "grid", gap: 6, maxWidth: 320 }}>
+          <label htmlFor="singleTextVerbosity" style={{ fontSize: 14, fontWeight: 600 }}>
+            Verbosity (optional)
+          </label>
+          <select
+            id="singleTextVerbosity"
+            name="textVerbosity"
+            defaultValue=""
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid #d7d7d7",
+              fontSize: 14,
+            }}
+          >
+            <option value="">Default</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+          </select>
+        </div>
         <button
           type="submit"
           style={{
