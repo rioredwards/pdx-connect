@@ -50,6 +50,12 @@ Use it for:
 - Target analysis + match scoring (**structured JSON**)
 - Outreach drafting (subject options + body + personalization anchors)
 
+### Backend (auth + database + storage): Supabase
+Use **Supabase** for a hackathon-friendly backend:
+- **Auth**: simple email/password or magic link
+- **Database (Postgres)**: store projects, profiles, packages, targets, analyses, drafts
+- **Storage** (optional): store raw Firecrawl markdown snapshots per scrape run (or keep in DB if small)
+
 ---
 
 ## Core objects (data model)
