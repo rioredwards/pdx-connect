@@ -120,6 +120,24 @@ Use **Supabase** for a hackathon-friendly backend:
 - “Offer goal” (optional): referrals, bundles, co-marketing, events
 - Target categories to search (e.g., `["gym","yoga studio","coffee shop"]`)
 
+### Example: The Regrainery (owner inputs *before* scraping)
+These are representative fields a business owner would fill in (or the app would collect) **before** Firecrawl runs on their site. They seed search, offers, and ranking—then scrape-derived `SourceBusinessProfile` data refines or overrides where needed.
+
+| Field | Sample value |
+| --- | --- |
+| Website URL | `https://regrainery.com/` |
+| Name (if known) | The Regrainery |
+| One-line pitch | Custom furniture and built-ins from reclaimed and live-edge wood—tables, shelves, and statement pieces for homes and small commercial spaces in Portland. |
+| City / area | Portland, OR — Northeast (Woodlawn / Concord) as home base; works citywide |
+| Search radius | 5 miles |
+| Partnership goal | Co-marketing and warm referrals to designers, stagers, and small venues that need wood fabrication for one-off or small-batch work—not high-volume contract manufacturing. |
+| Target categories | `interior design studio`, `home staging company`, `residential architect`, `boutique hotel`, `specialty coffee with event space` |
+| Exclusions (optional) | National furniture retail chains; high-volume import wholesalers |
+| Extra context (free text) | Small shop, limits concurrent builds; best fit when clients care about material story. No kitchen-cabinet packages over ~20 units. Partners who’ve scoped look/timeline; we own fabrication and install. |
+| Optional contact prefs | e.g. “Email mornings; no cold DMs to personal LinkedIn” |
+
+A machine-readable version of the same example lives in `test-cases/websites.json` under `ownerInputsBeforeScrape` for the `regrainery` test case.
+
 ---
 
 ## 1) Build Source Business Profile (Firecrawl)

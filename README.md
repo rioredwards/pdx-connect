@@ -39,7 +39,37 @@ supabase functions serve scrape_analyze --env-file supabase/.env.local
 
 ```bash
 curl -sS -X POST "http://localhost:54321/functions/v1/scrape_analyze" \
+  -H "Authorization: Bearer $FUNCTION_AUTH_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://regrainery.com/"}' | jq
+```
+
+### Web app (Next.js) + Vercel
+This repo includes a `web/` Next.js (App Router) app intended to be hosted on Vercel.
+
+- Vercel project settings (important):
+  - Set the Vercel **Root Directory** to `web` (so it picks up `web/package.json` and Next config).
+
+- Local dev:
+
+```bash
+cd web
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+- Vercel project settings (Production/Preview):
+  - `SCRAPE_ANALYZE_URL` = your deployed Supabase function URL, e.g. `https://<project-ref>.supabase.co/functions/v1/scrape_analyze`
+  - `SCRAPE_ANALYZE_SECRET` = same value as Supabase `FUNCTION_AUTH_SECRET` (set as a Supabase function secret)
+
+In Supabase, set a function secret:
+
+- `FUNCTION_AUTH_SECRET` = same string as Vercel `SCRAPE_ANALYZE_SECRET`
+
+Then deploy the function (example):
+
+```bash
+supabase functions deploy scrape_analyze
 ```
 

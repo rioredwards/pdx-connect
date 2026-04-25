@@ -1,9 +1,13 @@
 // Supabase Edge Function: scrape_analyze
-// Flow: URL -> Firecrawl markdown -> OpenAI GPT-5.5 structured JSON profile -> store in DB
+// Flow: URL -> multi-page Firecrawl (markdown + links) -> OpenAI structured profile -> store in DB
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 type Json = Record<string, unknown>;
+
+const DEFAULT_MAX_EXTRA_PAGES = 5;
+const MAX_EXTRA_PAGES_CAP = 11;
+const SCRAPE_CONCURRENCY = 3;
 
 function jsonResponse(status: number, body: Json) {
   return new Response(JSON.stringify(body), {
@@ -19,6 +23,115 @@ function requireEnv(name: string): string {
   const v = Deno.env.get(name);
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
+}
+
+function getBearerToken(req: Request): string | null {
+  const auth = req.headers.get("authorization") ?? "";
+  if (!auth.toLowerCase().startsWith("bearer ")) return null;
+  return auth.slice("bearer ".length).trim() || null;
+}
+
+function canonicalUrlKey(u: URL): string {
+  const path = u.pathname.replace(/\/+$/, "") || "/";
+  return `${u.protocol}//${u.host}${path}`.toLowerCase();
+}
+
+/** Pull link strings from Firecrawl v2 `data.links` (strings or { url }). */
+function linksFromData(data: unknown): string[] {
+  const raw = (data as { links?: unknown } | null)?.links;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object" && "url" in item) {
+        const u = (item as { url?: unknown }).url;
+        return typeof u === "string" ? u : null;
+      }
+      return null;
+    })
+    .filter((s): s is string => Boolean(s));
+}
+
+function pathScore(pathname: string): number {
+  const p = pathname.toLowerCase();
+  if (/^\/$/.test(p)) return 0;
+  let s = 0;
+  if (/(^|\/)about(\/|$)|our-story|who-we|team|mission|story/.test(p)) s += 6;
+  if (/(^|\/)service|services|product|products|work|what-we|offer|package|menu/.test(p)) s += 6;
+  if (/(^|\/)contact|location|locations|find-us|visit|hours/.test(p)) s += 5;
+  if (/(^|\/)pricing|price|book|reservation|schedule/.test(p)) s += 4;
+  if (/(^|\/)faq|support|resource/.test(p)) s += 2;
+  if (/(^|\/)blog|news|article|press/.test(p)) s += 0;
+  return s;
+}
+
+/**
+ * Select same-origin static-looking paths for follow-up scrapes.
+ */
+function selectExtraPageUrls(
+  homeUrl: string,
+  linkStrings: string[],
+  maxExtra: number,
+): string[] {
+  if (maxExtra <= 0) return [];
+  let home: URL;
+  try {
+    home = new URL(homeUrl);
+  } catch {
+    return [];
+  }
+  const homeKey = canonicalUrlKey(home);
+  const seen = new Set<string>([homeKey]);
+  const candidates: { url: URL; score: number }[] = [];
+  for (const raw of linkStrings) {
+    if (!raw || raw.startsWith("mailto:") || raw.startsWith("tel:") || raw.startsWith("javascript:")) {
+      continue;
+    }
+    let u: URL;
+    try {
+      u = new URL(raw, homeUrl);
+    } catch {
+      continue;
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") continue;
+    if (u.host.toLowerCase() !== home.host.toLowerCase()) continue;
+    if (u.hash && u.pathname === home.pathname) continue;
+    u.hash = "";
+    const k = canonicalUrlKey(u);
+    if (seen.has(k)) continue;
+    if (/\.(pdf|jpg|jpeg|png|gif|svg|zip|mp4|webp)(\?|$)/i.test(u.pathname)) continue;
+    const sc = pathScore(u.pathname);
+    if (sc < 1) continue;
+    seen.add(k);
+    candidates.push({ url: u, score: sc });
+  }
+  candidates.sort((a, b) => b.score - a.score || a.url.pathname.length - b.url.pathname.length);
+  return candidates.slice(0, maxExtra).map((c) => c.url.href);
+}
+
+function combinePageMarkdown(sections: { url: string; markdown: string }[]): string {
+  return sections
+    .map(
+      ({ url, markdown }) =>
+        `## Source page: ${url}\n\n${markdown || "(no markdown)"}\n\n---\n`,
+    )
+    .join("\n");
+}
+
+async function mapPool<T, R>(items: T[], concurrency: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (i < items.length) {
+        const idx = i++;
+        out[idx] = await fn(items[idx]!);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return out;
 }
 
 async function firecrawlScrape(url: string, apiKey: string) {
@@ -42,6 +155,57 @@ async function firecrawlScrape(url: string, apiKey: string) {
     );
   }
   return json;
+}
+
+type PageScrape = { url: string; success: true; data: unknown } | { url: string; success: false; error: string };
+
+/**
+ * Scrape the homepage, discover internal links, scrape a bounded set of
+ * high-signal pages, then return combined markdown and per-page details for storage.
+ */
+async function scrapeSourceBusinessSite(
+  homeUrl: string,
+  apiKey: string,
+  maxExtraPages: number,
+): Promise<{
+  combinedMarkdown: string;
+  homeScrape: unknown;
+  pageResults: PageScrape[];
+}> {
+  const homeJson = await firecrawlScrape(homeUrl, apiKey);
+  const homeData = (homeJson as { data?: { markdown?: string; links?: unknown } })?.data;
+  const homeMd = homeData?.markdown ?? "";
+  const linkStrings = linksFromData(homeData);
+  const extraUrls = selectExtraPageUrls(homeUrl, linkStrings, maxExtraPages);
+
+  const extraResults = await mapPool<string, PageScrape>(extraUrls, SCRAPE_CONCURRENCY, async (u) => {
+    try {
+      const j = await firecrawlScrape(u, apiKey);
+      return { url: u, success: true as const, data: j };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { url: u, success: false, error: message };
+    }
+  });
+
+  const sections: { url: string; markdown: string }[] = [
+    { url: homeUrl, markdown: homeMd },
+  ];
+  for (const r of extraResults) {
+    if (r.success) {
+      const md = (r.data as { data?: { markdown?: string } })?.data?.markdown ?? "";
+      sections.push({ url: r.url, markdown: md });
+    }
+  }
+
+  return {
+    combinedMarkdown: combinePageMarkdown(sections),
+    homeScrape: homeJson,
+    pageResults: [
+      { url: homeUrl, success: true, data: homeJson },
+      ...extraResults,
+    ],
+  };
 }
 
 async function openaiExtractProfile(markdown: string, sourceUrl: string, apiKey: string) {
@@ -113,12 +277,15 @@ async function openaiExtractProfile(markdown: string, sourceUrl: string, apiKey:
 
   const prompt = `Extract a structured business profile from the provided website content.
 
+The markdown may come from several pages of the same site, separated by "## Source page:" headings.
+
 Rules:
 - Output MUST conform to the JSON schema.
 - If a field is unknown, use an empty string or empty array, but keep required fields present.
-- Citations: include short snippets and URLs supporting key fields (name, description, location/contact, services).
+- Citations: use the "Source page" URL when citing which page a snippet came from.
+- If sections conflict, prefer information from an About, Services, or Contact page over generic home copy when appropriate.
 
-Website URL: ${sourceUrl}
+Primary website URL: ${sourceUrl}
 Content (markdown):
 ${markdown}
 `;
@@ -166,18 +333,39 @@ Deno.serve(async (req) => {
     return jsonResponse(405, { error: "Use POST" });
   }
 
+  let supabase: ReturnType<typeof createClient> | null = null;
+  let runId: string | null = null;
+
   try {
-    const { url, projectId } = await req.json().catch(() => ({}));
+    // Shared secret between your Next.js (Vercel) server and this Edge Function.
+    // Set `FUNCTION_AUTH_SECRET` in Supabase function secrets to match Vercel's `SCRAPE_ANALYZE_SECRET`.
+    const expectedSecret = requireEnv("FUNCTION_AUTH_SECRET");
+    const provided = getBearerToken(req);
+    if (!provided || provided !== expectedSecret) {
+      return jsonResponse(401, { error: "Unauthorized" });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { url, projectId, maxExtraPages: rawMaxExtra } = body as {
+      url?: string;
+      projectId?: string;
+      maxExtraPages?: number;
+    };
     if (!url || typeof url !== "string") {
       return jsonResponse(400, { error: "Missing 'url' (string)" });
     }
+
+    const maxExtra = Math.min(
+      MAX_EXTRA_PAGES_CAP,
+      Math.max(0, Number.isFinite(rawMaxExtra) ? Number(rawMaxExtra) : DEFAULT_MAX_EXTRA_PAGES),
+    );
 
     const supabaseUrl = requireEnv("SUPABASE_URL");
     const supabaseServiceKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
     const firecrawlKey = requireEnv("FIRECRAWL_API_KEY");
     const openaiKey = requireEnv("OPENAI_API_KEY");
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Ensure project exists (or create ephemeral)
     let effectiveProjectId: string | null = typeof projectId === "string" ? projectId : null;
@@ -198,33 +386,63 @@ Deno.serve(async (req) => {
         input_url: url,
         status: "running",
         model: "gpt-5.5",
+        kind: "source",
       })
       .select("id")
       .single();
     if (runErr) throw runErr;
+    runId = run.id;
 
-    const firecrawl = await firecrawlScrape(url, firecrawlKey);
-    const markdown = firecrawl?.data?.markdown ?? "";
-    const extracted = await openaiExtractProfile(markdown, url, openaiKey);
+    const { combinedMarkdown, homeScrape, pageResults } = await scrapeSourceBusinessSite(
+      url,
+      firecrawlKey,
+      maxExtra,
+    );
 
-    const { error: updErr } = await supabase
+    const firecrawlBundle = {
+      strategy: "multi_page" as const,
+      maxExtraPages: maxExtra,
+      home: homeScrape,
+      pageResults,
+      combinedMarkdown,
+    };
+
+    const extracted = await openaiExtractProfile(combinedMarkdown, url, openaiKey);
+
+    const { error: updRunErr } = await supabase
       .from("scrape_runs")
       .update({
         status: "succeeded",
-        firecrawl_response: firecrawl,
+        firecrawl_response: firecrawlBundle,
         extracted_profile: extracted,
       })
       .eq("id", run.id);
-    if (updErr) throw updErr;
+    if (updRunErr) throw updRunErr;
+
+    const { error: projUpdErr } = await supabase
+      .from("projects")
+      .update({
+        source_profile: extracted,
+        source_name: typeof extracted.name === "string" ? extracted.name : null,
+      })
+      .eq("id", effectiveProjectId);
+    if (projUpdErr) throw projUpdErr;
 
     return jsonResponse(200, {
       ok: true,
       projectId: effectiveProjectId,
       scrapeRunId: run.id,
       extractedProfile: extracted,
+      pagesScraped: pageResults.length,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    if (supabase && runId) {
+      await supabase
+        .from("scrape_runs")
+        .update({ status: "failed", error: message })
+        .eq("id", runId);
+    }
     return jsonResponse(500, { ok: false, error: message });
   }
 });

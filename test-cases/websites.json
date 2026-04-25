@@ -3,6 +3,37 @@
     "id": "regrainery",
     "name": "The Regrainery",
     "url": "https://regrainery.com/",
-    "notes": "Portland, OR custom furniture/woodworking. Good test for services/portfolio/testimonials/contact extraction."
+    "notes": "Portland, OR custom furniture/woodworking. Good test for services/portfolio/testimonials/contact extraction.",
+    "ownerInputsBeforeScrape": {
+      "websiteUrl": "https://regrainery.com/",
+      "businessNameHint": "The Regrainery",
+      "oneLinePitch": "Custom furniture and built-ins from reclaimed and live-edge wood—tables, shelves, and statement pieces for homes and small commercial spaces in Portland.",
+      "location": {
+        "city": "Portland",
+        "region": "OR",
+        "neighborhoodOrArea": "Northeast (Woodlawn / Concord area—flexible, we work citywide)"
+      },
+      "search": {
+        "centerLabel": "Northeast Portland, OR",
+        "radiusMiles": 5,
+        "partnershipGoal": "Co-marketing and warm referrals: interior designers, stagers, and venue managers who need trusted wood fabrication for one-off or small-batch work—not mass contract manufacturing."
+      },
+      "targetCategories": [
+        "interior design studio",
+        "home staging company",
+        "residential architect",
+        "boutique hotel",
+        "specialty coffee with event space"
+      ],
+      "exclusions": [
+        "national furniture retail chains",
+        "high-volume import furniture wholesalers"
+      ],
+      "extraContextForMatching": "Shop is small; we cap concurrent builds and prefer projects where clients care about the story of the material (reclaimed, local sourcing). We do not do kitchen cabinet packages over 20 units. Best partners send us after they've scoped aesthetic and timeline—we handle fabrication and install details.",
+      "optionalContactPreferences": {
+        "bestDays": ["Tuesday", "Thursday"],
+        "notes": "Owner reads email mornings; no cold LinkedIn DMs to personal accounts, please."
+      }
+    }
   }
 ]

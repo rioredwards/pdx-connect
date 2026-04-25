@@ -4,3 +4,13 @@
 supabase/.temp/
 supabase/.env.local
 
+# Node
+node_modules/
+.next/
+out/
+dist/
+
+# Env
+.env
+.env*.local
+
