@@ -15,6 +15,9 @@ Ship the demo fast; not a platform.
 | Path | Use when |
 |------|----------|
 | `close-loop-engineering` | “Close the loop”, ship safely, or validate non-trivial work (lint, typecheck, test, build, smoke) |
+| `frontend-design` | Distinctive UI direction, typography, motion, and layout (avoid generic AI aesthetics) |
+| `tailwind` | Tailwind v4, `globals.css`, `@theme`, utilities and `cn()` in `web/` |
+| `shadcn` | shadcn/ui CLI, `components.json`, primitives under `web/components/ui` |
 | `nextjs` | App Router, RSC, Actions, `next.config`, routing |
 | `vercel-functions` | Route Handlers, runtimes, limits |
 | `env-vars` | `vercel env`, `.env.local`, `NEXT_PUBLIC_` |
