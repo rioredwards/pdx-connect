@@ -1,0 +1,1 @@
+Create a new component in the appropriate directory. Ask me for the component name and what it should do, then create it with proper types, modern patterns, and styling that matches the existing codebase.

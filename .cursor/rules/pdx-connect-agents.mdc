@@ -1,0 +1,11 @@
+---
+description: Project agent instructions; load AGENTS.md and spec before substantive work
+alwaysApply: true
+---
+
+# pdx-connect agent context
+
+- **Primary instructions:** `AGENTS.md` at the repo root (product, stack, secrets, skills index). Follow it on conflicts.
+- **Also read when relevant:** `GLOBAL-AGENTS.md`, `.cursor/roles/general-dev/AGENTS.md`, and for product and acceptance tests **`FIRECRAWL_MVP_SPEC.md`**.
+
+Do not restate `AGENTS.md` here. Open and follow the files above when planning or changing behavior. Time box, speed, and sprint depriorities are in root `AGENTS.md` (intro and "How assistants work here").
