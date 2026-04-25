@@ -1,0 +1,21 @@
+project_id = "pdx-connect"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+
+[studio]
+enabled = true
+port = 54323
+
+#
+# Note: Supabase CLI runs Edge Functions automatically when you use:
+# `supabase functions serve <name>`
+#
+
