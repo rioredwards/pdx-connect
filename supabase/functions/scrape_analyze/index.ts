@@ -328,8 +328,10 @@ ${markdown}
     throw new Error(`OpenAI extraction failed (${resp.status}): ${JSON.stringify(json)}`);
   }
 
-  // Responses API: strict json_schema may arrive as output_json, or as output_text (stringified JSON).
-  const content = json?.output?.[0]?.content ?? [];
+  // Responses API: prefer the `message` output item (after optional `reasoning` items).
+  const items = json?.output ?? [];
+  const messageItem = items.find((o: { type?: string }) => o?.type === "message") ?? items[items.length - 1];
+  const content = (messageItem?.content ?? json?.output?.[0]?.content ?? []) as unknown[];
   const jsonPart = content.find((c: { type?: string; json?: unknown }) => c?.type === "output_json");
   if (jsonPart && typeof jsonPart === "object" && "json" in jsonPart && jsonPart.json != null) {
     return jsonPart.json;

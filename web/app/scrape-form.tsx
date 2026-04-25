@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { scrapeWebsiteAction, type ScrapeState } from "./actions";
+import { ProfileDisplay } from "./profile-display";
 
 const initialState: ScrapeState | null = null;
 
@@ -80,21 +81,42 @@ export function ScrapeForm() {
       ) : null}
 
       {state && state.ok ? (
-        <pre
-          style={{
-            margin: 0,
-            padding: 12,
-            borderRadius: 10,
-            background: "#f8fafc",
-            border: "1px solid #e2e8f0",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            fontSize: 12,
-            lineHeight: 1.45,
-          }}
-        >
-          {state.pretty}
-        </pre>
+        <>
+          <ProfileDisplay
+            profile={state.view.extractedProfile}
+            pagesScraped={state.view.pagesScraped}
+            projectId={state.view.projectId}
+            scrapeRunId={state.view.scrapeRunId}
+          />
+          <details
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid #e2e8f0",
+              background: "white",
+            }}
+          >
+            <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#475569" }}>
+              Raw JSON response
+            </summary>
+            <pre
+              style={{
+                margin: "12px 0 0",
+                padding: 12,
+                borderRadius: 8,
+                background: "#f1f5f9",
+                border: "1px solid #e2e8f0",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontSize: 12,
+                lineHeight: 1.45,
+              }}
+            >
+              {state.pretty}
+            </pre>
+          </details>
+        </>
       ) : null}
     </form>
   );
